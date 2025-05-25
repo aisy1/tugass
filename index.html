@@ -1,0 +1,707 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chemical Bonding Runner</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(45deg, #1e3c72, #2a5298);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #gameContainer {
+            width: 800px;
+            height: 600px;
+            background: linear-gradient(180deg, #87CEEB 0%, #98FB98 100%);
+            position: relative;
+            border: 3px solid #333;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        #gameCanvas {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, #87CEEB 0%, #98FB98 100%);
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+            z-index: 100;
+        }
+
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            display: none;
+            z-index: 200;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: white;
+            font-size: 14px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.7);
+        }
+
+        .molecule {
+            position: absolute;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .electron {
+            background: radial-gradient(circle, #FFD700, #FFA500);
+            color: #333;
+            animation: glow 1s ease-in-out infinite alternate;
+        }
+
+        .atom {
+            background: radial-gradient(circle, #FF6B6B, #FF4757);
+            color: white;
+        }
+
+        .bond {
+            background: radial-gradient(circle, #4ECDC4, #45B7B8);
+            color: white;
+        }
+
+        .obstacle {
+            background: radial-gradient(circle, #2F2F2F, #1A1A1A);
+            color: #FF4757;
+        }
+
+        @keyframes glow {
+            from { box-shadow: 0 0 10px #FFD700; }
+            to { box-shadow: 0 0 20px #FFA500, 0 0 30px #FFD700; }
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .floating {
+            animation: float 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        
+        <div id="ui">
+            <div>Score: <span id="score">0</span></div>
+            <div>Molecules: <span id="bonds">0</span></div>
+            <div>Speed: <span id="speed">1</span></div>
+            <div id="currentMolecule" style="font-size: 14px; margin-top: 5px;"></div>
+            <div id="recentMolecules" style="font-size: 12px; margin-top: 5px; max-height: 80px; overflow-y: auto;"></div>
+        </div>
+
+        <div id="instructions">
+            Use ↑↓ Arrow Keys or W/S to move • SPACE to pause • Collect atoms to form bonds • Avoid obstacles!
+        </div>
+
+        <div id="gameOver">
+            <h2>Game Over!</h2>
+            <p>You formed <span id="finalBonds">0</span> molecules!</p>
+            <p>Final Score: <span id="finalScore">0</span></p>
+            <div id="moleculesSummary" style="margin: 15px 0; font-size: 14px;"></div>
+            <button onclick="restartGame()">Play Again</button>
+        </div>
+
+        <div id="pauseMenu" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); color: white; padding: 40px; border-radius: 15px; text-align: center; display: none; z-index: 200;">
+            <h2>Game Paused</h2>
+            <p>Press SPACE to resume</p>
+            <div style="margin: 20px 0; font-size: 14px; color: #ccc;">
+                <div>Current Score: <span id="pauseScore">0</span></div>
+                <div>Molecules Formed: <span id="pauseBonds">0</span></div>
+                <div>Current Speed: <span id="pauseSpeed">1</span></div>
+            </div>
+            <button onclick="resumeGame()">Resume</button>
+            <button onclick="restartFromPause()">Restart</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game state
+        let gameRunning = true;
+        let gamePaused = false;
+        let score = 0;
+        let bonds = 0;
+        let gameSpeed = 2;
+        let backgroundOffset = 0;
+        let collectedAtoms = [];
+        let formedMolecules = [];
+        
+        // Player (electron)
+        const player = {
+            x: 100,
+            y: 300,
+            width: 40,
+            height: 40,
+            dy: 0,
+            speed: 8
+        };
+        
+        // Game objects
+        let atoms = [];
+        let obstacles = [];
+        let bondsFormed = [];
+        let particles = [];
+        
+        // Atom types with different properties
+        const atomTypes = [
+            { symbol: 'H', color: '#FF6B6B', value: 5 },
+            { symbol: 'C', color: '#4ECDC4', value: 10 },
+            { symbol: 'N', color: '#45B7B8', value: 15 },
+            { symbol: 'O', color: '#96CEB4', value: 12 }
+        ];
+        const molecularRecipes = [
+            { 
+                formula: 'H₂O', 
+                name: 'Water',
+                atoms: { H: 2, O: 1 }, 
+                points: 100,
+                description: 'Two hydrogen atoms bond with one oxygen atom'
+            },
+            { 
+                formula: 'NH₃', 
+                name: 'Ammonia',
+                atoms: { N: 1, H: 3 }, 
+                points: 120,
+                description: 'One nitrogen atom bonds with three hydrogen atoms'
+            },
+            { 
+                formula: 'CO₂', 
+                name: 'Carbon Dioxide',
+                atoms: { C: 1, O: 2 }, 
+                points: 90,
+                description: 'One carbon atom bonds with two oxygen atoms'
+            },
+            { 
+                formula: 'CH₄', 
+                name: 'Methane',
+                atoms: { C: 1, H: 4 }, 
+                points: 140,
+                description: 'One carbon atom bonds with four hydrogen atoms'
+            },
+            { 
+                formula: 'CO', 
+                name: 'Carbon Monoxide',
+                atoms: { C: 1, O: 1 }, 
+                points: 70,
+                description: 'One carbon atom bonds with one oxygen atom'
+            },
+            { 
+                formula: 'N₂', 
+                name: 'Nitrogen Gas',
+                atoms: { N: 2 }, 
+                points: 80,
+                description: 'Two nitrogen atoms form a triple bond'
+            },
+            { 
+                formula: 'H₂', 
+                name: 'Hydrogen Gas',
+                atoms: { H: 2 }, 
+                points: 60,
+                description: 'Two hydrogen atoms share electrons'
+            }
+        ];
+        
+        // Check if collected atoms can form any molecules
+        function checkMoleculeFormation() {
+            const atomCounts = {};
+            collectedAtoms.forEach(atom => {
+                atomCounts[atom] = (atomCounts[atom] || 0) + 1;
+            });
+            
+            // Check each recipe
+            for (let recipe of molecularRecipes) {
+                let canForm = true;
+                for (let [element, needed] of Object.entries(recipe.atoms)) {
+                    if ((atomCounts[element] || 0) < needed) {
+                        canForm = false;
+                        break;
+                    }
+                }
+                
+                if (canForm) {
+                    // Remove used atoms
+                    for (let [element, needed] of Object.entries(recipe.atoms)) {
+                        for (let i = 0; i < needed; i++) {
+                            const index = collectedAtoms.indexOf(element);
+                            if (index > -1) {
+                                collectedAtoms.splice(index, 1);
+                            }
+                        }
+                    }
+                    
+                    // Add molecule to formed list
+                    formedMolecules.push(recipe);
+                    bonds++;
+                    score += recipe.points;
+                    
+                    // Show molecule formation
+                    showMoleculeFormation(recipe);
+                    
+                    // Check for more molecules recursively
+                    checkMoleculeFormation();
+                    break;
+                }
+            }
+        }
+        
+        // Display molecule formation
+        function showMoleculeFormation(molecule) {
+            const currentMolecule = document.getElementById('currentMolecule');
+            const recentMolecules = document.getElementById('recentMolecules');
+            
+            currentMolecule.innerHTML = `<span style="color: #4CAF50; font-weight: bold;">Formed: ${molecule.formula} (${molecule.name})!</span>`;
+            
+            // Add to recent molecules list
+            const moleculeDiv = document.createElement('div');
+            moleculeDiv.innerHTML = `${molecule.formula} - ${molecule.name} (+${molecule.points} pts)`;
+            moleculeDiv.style.color = '#E8E8E8';
+            recentMolecules.insertBefore(moleculeDiv, recentMolecules.firstChild);
+            
+            // Clear current molecule display after 3 seconds
+            setTimeout(() => {
+                currentMolecule.innerHTML = `Collected: ${collectedAtoms.join(', ') || 'None'}`;
+            }, 3000);
+            
+            // Keep only last 5 molecules in recent list
+            while (recentMolecules.children.length > 5) {
+                recentMolecules.removeChild(recentMolecules.lastChild);
+            }
+        }
+        
+        // Input handling
+        const keys = {};
+        
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            
+            // Handle pause toggle
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                e.preventDefault(); // Prevent page scroll
+                if (gameRunning && !document.getElementById('gameOver').style.display === 'block') {
+                    togglePause();
+                }
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+        });
+        
+        // Pause game functions
+        function togglePause() {
+            if (gamePaused) {
+                resumeGame();
+            } else {
+                pauseGame();
+            }
+        }
+        
+        function pauseGame() {
+            gamePaused = true;
+            document.getElementById('pauseScore').textContent = score;
+            document.getElementById('pauseBonds').textContent = bonds;
+            document.getElementById('pauseSpeed').textContent = gameSpeed.toFixed(1);
+            document.getElementById('pauseMenu').style.display = 'block';
+        }
+        
+        function resumeGame() {
+            gamePaused = false;
+            document.getElementById('pauseMenu').style.display = 'none';
+        }
+        
+        function restartFromPause() {
+            gamePaused = false;
+            document.getElementById('pauseMenu').style.display = 'none';
+            restartGame();
+        }
+        
+        // Particle effect for collecting atoms
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    life: 30,
+                    color: color
+                });
+            }
+        }
+        
+        // Spawn atoms
+        function spawnAtom() {
+            if (Math.random() < 0.3) {
+                const atomType = atomTypes[Math.floor(Math.random() * atomTypes.length)];
+                atoms.push({
+                    x: canvas.width,
+                    y: Math.random() * (canvas.height - 100) + 50,
+                    width: 40,
+                    height: 40,
+                    type: atomType,
+                    collected: false
+                });
+            }
+        }
+        
+        // Spawn obstacles
+        function spawnObstacle() {
+            if (Math.random() < 0.15) {
+                obstacles.push({
+                    x: canvas.width,
+                    y: Math.random() * (canvas.height - 100) + 50,
+                    width: 50,
+                    height: 50,
+                    type: 'toxic'
+                });
+            }
+        }
+        
+        // Check collision
+        function checkCollision(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+        
+        // Draw rounded rectangle
+        function drawRoundedRect(x, y, width, height, radius, color) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.roundRect(x, y, width, height, radius);
+            ctx.fill();
+        }
+        
+        // Draw player (electron)
+        function drawPlayer() {
+            const gradient = ctx.createRadialGradient(
+                player.x + player.width/2, player.y + player.height/2, 5,
+                player.x + player.width/2, player.y + player.height/2, player.width/2
+            );
+            gradient.addColorStop(0, '#FFD700');
+            gradient.addColorStop(1, '#FFA500');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Glow effect
+            ctx.shadowColor = '#FFD700';
+            ctx.shadowBlur = 20;
+            ctx.beginPath();
+            ctx.arc(player.x + player.width/2, player.y + player.height/2, player.width/2 - 5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+            
+            // Draw electron symbol
+            ctx.fillStyle = '#333';
+            ctx.font = 'bold 18px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('e⁻', player.x + player.width/2, player.y + player.height/2 + 6);
+        }
+        
+        // Draw atom
+        function drawAtom(atom) {
+            const gradient = ctx.createRadialGradient(
+                atom.x + atom.width/2, atom.y + atom.height/2, 5,
+                atom.x + atom.width/2, atom.y + atom.height/2, atom.width/2
+            );
+            gradient.addColorStop(0, atom.type.color);
+            gradient.addColorStop(1, atom.type.color + '80');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(atom.x + atom.width/2, atom.y + atom.height/2, atom.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(atom.type.symbol, atom.x + atom.width/2, atom.y + atom.height/2 + 5);
+        }
+        
+        // Draw obstacle
+        function drawObstacle(obstacle) {
+            const gradient = ctx.createRadialGradient(
+                obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2, 5,
+                obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2, obstacle.width/2
+            );
+            gradient.addColorStop(0, '#2F2F2F');
+            gradient.addColorStop(1, '#1A1A1A');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2, obstacle.width/2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#FF4757';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('☠', obstacle.x + obstacle.width/2, obstacle.y + obstacle.height/2 + 7);
+        }
+        
+        // Draw background
+        function drawBackground() {
+            // Scrolling molecular background
+            backgroundOffset -= gameSpeed;
+            if (backgroundOffset <= -100) backgroundOffset = 0;
+            
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            for (let i = 0; i < 10; i++) {
+                const x = (i * 100) + backgroundOffset;
+                const y = 100 + Math.sin((x + backgroundOffset) * 0.01) * 50;
+                ctx.beginPath();
+                ctx.arc(x, y, 30, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw molecular bonds
+                if (i > 0) {
+                    const prevX = ((i-1) * 100) + backgroundOffset;
+                    const prevY = 100 + Math.sin((prevX + backgroundOffset) * 0.01) * 50;
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(prevX + 30, prevY);
+                    ctx.lineTo(x - 30, y);
+                    ctx.stroke();
+                }
+            }
+        }
+        
+        // Update game logic
+        function update() {
+            if (!gameRunning || gamePaused) return;
+            
+            // Handle input
+            if (keys['ArrowUp'] || keys['w'] || keys['W']) {
+                player.dy = -player.speed;
+            } else if (keys['ArrowDown'] || keys['s'] || keys['S']) {
+                player.dy = player.speed;
+            } else {
+                player.dy *= 0.8; // Gradual stop
+            }
+            
+            // Update player position
+            player.y += player.dy;
+            player.y = Math.max(0, Math.min(canvas.height - player.height, player.y));
+            
+            // Spawn objects
+            if (Math.random() < 0.02) spawnAtom();
+            if (Math.random() < 0.008) spawnObstacle();
+            
+            // Update atoms
+            atoms = atoms.filter(atom => {
+                atom.x -= gameSpeed;
+                
+                // Check collision with player
+                if (!atom.collected && checkCollision(player, atom)) {
+                    atom.collected = true;
+                    score += atom.type.value;
+                    collectedAtoms.push(atom.type.symbol);
+                    createParticles(atom.x + atom.width/2, atom.y + atom.height/2, atom.type.color);
+                    
+                    // Check if we can form any molecules
+                    checkMoleculeFormation();
+                    
+                    // Update current atoms display
+                    document.getElementById('currentMolecule').innerHTML = `Collected: ${collectedAtoms.join(', ') || 'None'}`;
+                    
+                    // Increase speed occasionally
+                    if (bonds % 5 === 0 && bonds > 0) {
+                        gameSpeed += 0.3;
+                    }
+                    
+                    return false;
+                }
+                
+                return atom.x > -atom.width;
+            });
+            
+            // Update obstacles
+            obstacles = obstacles.filter(obstacle => {
+                obstacle.x -= gameSpeed;
+                
+                // Check collision with player
+                if (checkCollision(player, obstacle)) {
+                    gameOver();
+                    return false;
+                }
+                
+                return obstacle.x > -obstacle.width;
+            });
+            
+            // Update particles
+            particles = particles.filter(particle => {
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.life--;
+                particle.vy += 0.3; // Gravity
+                return particle.life > 0;
+            });
+            
+            // Update score
+            score += Math.floor(gameSpeed);
+        }
+        
+        // Render game
+        function render() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background
+            drawBackground();
+            
+            // Draw game objects
+            atoms.forEach(drawAtom);
+            obstacles.forEach(drawObstacle);
+            
+            // Draw particles
+            particles.forEach(particle => {
+                ctx.fillStyle = particle.color + Math.floor(particle.life * 8.5).toString(16).padStart(2, '0');
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            
+            // Draw player
+            drawPlayer();
+            
+            // Draw pause indicator if paused
+            if (gamePaused) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = 'white';
+                ctx.font = 'bold 48px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('PAUSED', canvas.width/2, canvas.height/2);
+                
+                ctx.font = '24px Arial';
+                ctx.fillText('Press SPACE to resume', canvas.width/2, canvas.height/2 + 50);
+            }
+        }
+        
+        // Game over
+        function gameOver() {
+            gameRunning = false;
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalBonds').textContent = bonds;
+            
+            // Show molecules summary
+            const summary = document.getElementById('moleculesSummary');
+            const moleculeCounts = {};
+            formedMolecules.forEach(mol => {
+                moleculeCounts[mol.formula] = (moleculeCounts[mol.formula] || 0) + 1;
+            });
+            
+            let summaryText = '<strong>Molecules Formed:</strong><br>';
+            for (let [formula, count] of Object.entries(moleculeCounts)) {
+                const molecule = molecularRecipes.find(m => m.formula === formula);
+                summaryText += `${formula} (${molecule.name}): ${count}<br>`;
+            }
+            
+            if (Object.keys(moleculeCounts).length === 0) {
+                summaryText += 'No complete molecules formed';
+            }
+            
+            summary.innerHTML = summaryText;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        // Restart game
+        function restartGame() {
+            gameRunning = true;
+            gamePaused = false;
+            score = 0;
+            bonds = 0;
+            gameSpeed = 2;
+            player.y = 300;
+            player.dy = 0;
+            atoms = [];
+            obstacles = [];
+            particles = [];
+            collectedAtoms = [];
+            formedMolecules = [];
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('pauseMenu').style.display = 'none';
+            document.getElementById('currentMolecule').innerHTML = 'Collected: None';
+            document.getElementById('recentMolecules').innerHTML = '';
+            backgroundOffset = 0;
+        }
+        
+        // Update UI
+        function updateUI() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('bonds').textContent = bonds;
+            document.getElementById('speed').textContent = gameSpeed.toFixed(1);
+        }
+        
+        // Main game loop
+        function gameLoop() {
+            update();
+            render();
+            updateUI();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        gameLoop();
+    </script>
+</body>
+</html>
